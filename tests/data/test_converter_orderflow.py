@@ -11,6 +11,8 @@ from freqtrade.data.converter.orderflow import (
 )
 from freqtrade.data.converter.trade_converter import trades_list_to_df
 from freqtrade.data.dataprovider import DataProvider
+from freqtrade.data.history.datahandlers.featherdatahandler import FeatherDataHandler
+from freqtrade.enums import RunMode, TradingMode
 from tests.strategy.strats.strategy_test_v3 import StrategyTestV3
 
 
@@ -478,6 +480,51 @@ def test_public_trades_testdata_sanity(
         "cost",
         "date",
     ]
+
+
+def test_backtest_orderflow_loads_trades_through_the_last_candle(
+    default_conf_usdt, tmp_path, mocker
+):
+    pair = "BTC/USDT"
+    config = default_conf_usdt | {
+        "datadir": tmp_path,
+        "dataformat_trades": "feather",
+        "runmode": RunMode.BACKTEST,
+        "timeframe": "5m",
+        "orderflow": {
+            "cache_size": 5,
+            "max_candles": 5,
+            "scale": 1,
+            "imbalance_volume": 0,
+            "imbalance_ratio": 3,
+            "stacked_imbalance_range": 3,
+        },
+    }
+    config["exchange"]["use_public_trades"] = True
+    candle_dates = pd.date_range("2026-01-02", periods=2, freq="5min", tz="UTC")
+    times = candle_dates[0] + pd.to_timedelta([60_000, 599_999, 600_000], unit="ms")
+    trades = pd.DataFrame(
+        {
+            "timestamp": times.as_unit("ms").asi8,
+            "id": ["first", "last", "next"],
+            "type": "market",
+            "side": "buy",
+            "price": 100.0,
+            "amount": 1.0,
+            "cost": 100.0,
+        }
+    )
+    FeatherDataHandler(tmp_path).trades_store(pair, trades, TradingMode.SPOT)
+    strategy = StrategyTestV3(config)
+    strategy.dp = DataProvider(config, exchange=None)
+    load_trades = mocker.spy(strategy.dp, "trades")
+
+    result = strategy._if_enabled_populate_trades(
+        pd.DataFrame({"date": candle_dates}), {"pair": pair}
+    )
+
+    assert result["total_trades"].tolist() == [1, 1]
+    assert load_trades.spy_return["id"].tolist() == ["first", "last"]
 
 
 def test_analyze_with_orderflow(

@@ -1794,7 +1794,10 @@ class IStrategy(ABC, HyperStrategyMixin):
             # Build timerange from dataframe date column
             if not dataframe.empty:
                 start_ts = dt_ts(dataframe["date"].iloc[0])
-                end_ts = dt_ts(dataframe["date"].iloc[-1])
+                # The trade filter has an inclusive upper bound. Include the
+                # whole last candle while excluding the next candle's opening.
+                next_candle = timeframe_to_next_date(self.timeframe, dataframe["date"].iloc[-1])
+                end_ts = dt_ts(next_candle) - 1
                 timerange = TimeRange("date", "date", startts=start_ts, stopts=end_ts)
             else:
                 timerange = None
